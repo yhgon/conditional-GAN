@@ -2,6 +2,7 @@ import argparse
 import os
 import numpy as np
 import math
+import time
 
 import torchvision.transforms as transforms
 from torchvision.utils import save_image
@@ -99,6 +100,9 @@ adversarial_loss = torch.nn.BCELoss()
 generator = Generator()
 discriminator = Discriminator()
 
+print(generator)
+print(discriminator)
+
 if torch.cuda.is_available():
     generator.cuda()
     discriminator.cuda()
@@ -115,7 +119,7 @@ dataloader = torch.utils.data.DataLoader(
                    transform=transforms.Compose([
                        transforms.Resize(args.img_size),
                        transforms.ToTensor(),
-                       transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+                       transforms.Normalize((0.5), (0.5))
                    ])),
     batch_size=args.batch_size, shuffle=True, drop_last=True)
 print('the data is ok')
@@ -125,9 +129,11 @@ print('the data is ok')
 optimizer_G = torch.optim.Adam(generator.parameters(), lr=args.lr, betas=(args.beta1, args.beta2))
 optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=args.lr, betas=(args.beta1, args.beta2))
 
+print("start loop")
 for epoch in range(args.n_epochs):
-    for i, (imgs, labels) in enumerate(dataloader):
-
+    for i, (imgs, labels) in enumerate(dataloader):        
+        print("{:d} {:d} |".format(epoch, i), end='' )
+        tic_prep = time.time()
         Batch_Size = args.batch_size
         N_Class = args.n_classes
         img_size = args.img_size
@@ -147,9 +153,12 @@ for epoch in range(args.n_epochs):
         gen_labels = (torch.rand(Batch_Size, 1) * N_Class).type(torch.LongTensor)
         gen_y = torch.zeros(Batch_Size, N_Class)
         gen_y = Variable(gen_y.scatter_(1, gen_labels.view(Batch_Size, 1), 1).view(Batch_Size, N_Class,1,1).cuda())
+
+        toc_prep = time.time()
         # ---------------------
         #  Train Discriminator
         # ---------------------
+        tic_D = time.time()
         optimizer_D.zero_grad()
         # Loss for real images
         d_real_loss = adversarial_loss(discriminator(real_imgs, real_y).squeeze(), valid)
@@ -163,19 +172,26 @@ for epoch in range(args.n_epochs):
         d_loss.backward()
         optimizer_D.step()
 
+        toc_D = time.time()
         # -----------------
         #  Train Generator
         # -----------------
-
+        tic_G = time.time()
         optimizer_G.zero_grad()
 
         g_loss = adversarial_loss(discriminator(gen_imgs,gen_y_for_D).squeeze(), valid)
         g_loss.backward()
         optimizer_G.step()
+        toc_G = time.time()
+        dur_prep = toc_prep - tic_prep
+        dur_D = toc_D - tic_D
+        dur_G = toc_G - tic_G 
+        dur_iter = toc_G - tic_prep
 
 
-        print ("[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f]" % (epoch, args.n_epochs, i, len(dataloader),
-                                                            d_loss.data.cpu(), g_loss.data.cpu()))
+        print ("[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f] [prep: %3.4f msec] [D:%3.4f msec]  [G:%3.4f msec] [iter : %3.4f msec ] " % (epoch, args.n_epochs, i, len(dataloader),
+                                                            d_loss.data.cpu(), g_loss.data.cpu() ,
+                                                            dur_prep*1000,dur_D*1000, dur_G*1000, dur_iter*1000   ))
 
         batches_done = epoch * len(dataloader) + i
         if batches_done % args.sample_interval == 0:
